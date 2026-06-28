@@ -42,6 +42,7 @@ services:
     environment:
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
+        parallelism.default: 1
         s3.endpoint: http://minio:9000
         s3.access-key: minioadmin
         s3.secret-key: minioadmin
@@ -56,7 +57,8 @@ services:
     environment:
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
-        taskmanager.numberOfTaskSlots: 2
+        taskmanager.numberOfTaskSlots: 4
+        parallelism.default: 1
         s3.endpoint: http://minio:9000
         s3.access-key: minioadmin
         s3.secret-key: minioadmin

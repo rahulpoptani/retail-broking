@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.retailbroking.aggregation.OHLCVWindowFunction;
 import com.retailbroking.aggregation.VWAPWindowFunction;
 import com.retailbroking.model.MarketData;
+import com.retailbroking.sink.ClickHouseOHLCVSink;
+import com.retailbroking.sink.ClickHouseVWAPSink;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
@@ -39,26 +41,29 @@ public class MarketDataConsumer {
                                 .withTimestampAssigner((event, ts) -> event.epochMillis())
                 );
 
-        // 5-minute OHLCV bars per symbol
+        // 5-minute OHLCV bars per symbol → ohlcv_bars
         marketData
                 .keyBy(md -> md.symbol)
                 .window(TumblingEventTimeWindows.of(Time.minutes(5)))
                 .process(new OHLCVWindowFunction("5MIN"))
-                .print();
+                .addSink(new ClickHouseOHLCVSink())
+                .name("ClickHouse: ohlcv_bars (5MIN)");
 
-        // 15-minute OHLCV bars per symbol
+        // 15-minute OHLCV bars per symbol → ohlcv_bars
         marketData
                 .keyBy(md -> md.symbol)
                 .window(TumblingEventTimeWindows.of(Time.minutes(15)))
                 .process(new OHLCVWindowFunction("15MIN"))
-                .print();
+                .addSink(new ClickHouseOHLCVSink())
+                .name("ClickHouse: ohlcv_bars (15MIN)");
 
-        // Daily VWAP per symbol
+        // Daily VWAP per symbol → vwap_daily
         marketData
                 .keyBy(md -> md.symbol)
                 .window(TumblingEventTimeWindows.of(Time.days(1)))
                 .process(new VWAPWindowFunction())
-                .print();
+                .addSink(new ClickHouseVWAPSink())
+                .name("ClickHouse: vwap_daily");
 
         env.execute("Market Data Aggregation");
     }
