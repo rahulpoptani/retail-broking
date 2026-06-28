@@ -1,0 +1,74 @@
+cubes:
+  - name: AccountPositions
+    sql_table: gold.account_positions
+    # Grain: one row per (account_id, instrument) — end-of-day snapshot.
+    # Reflects open positions after settlement. Not time-series; point-in-time.
+    # Use Iceberg time-travel via Trino AS OF if you need a historical snapshot.
+
+    dimensions:
+      - name: account_id
+        sql: account_id
+        type: string
+
+      - name: instrument
+        sql: instrument
+        type: string
+
+      - name: quantity
+        sql: quantity
+        type: number
+        description: Net open position quantity (positive = long, negative = short)
+
+      - name: avg_price
+        sql: avg_price
+        type: number
+        description: Volume-weighted average cost of the open position
+
+    measures:
+      - name: total_positions
+        type: count
+        description: Number of open account-instrument position rows
+
+      - name: accounts_with_positions
+        sql: account_id
+        type: count_distinct
+        description: Number of unique accounts holding any open position
+
+      - name: instruments_held
+        sql: instrument
+        type: count_distinct
+        description: Number of distinct instruments held across all accounts
+
+      - name: total_long_quantity
+        sql: quantity
+        type: sum
+        filters:
+          - sql: "{CUBE}.quantity > 0"
+        description: Total long (buy) position quantity across all accounts
+
+      - name: total_short_quantity
+        sql: quantity
+        type: sum
+        filters:
+          - sql: "{CUBE}.quantity < 0"
+        description: Total short (sell) position quantity across all accounts
+
+      # Notional exposure: quantity × avg_price — proxy for portfolio value
+      - name: total_notional_exposure
+        sql: "quantity * avg_price"
+        type: sum
+        description: Total notional exposure (quantity × avg_cost) across all positions
+
+    pre_aggregations:
+      - name: by_instrument
+        type: rollup
+        dimensions:
+          - instrument
+        measures:
+          - total_positions
+          - total_long_quantity
+          - total_short_quantity
+          - total_notional_exposure
+          - accounts_with_positions
+        refresh_key:
+          every: 1 hour

@@ -1,0 +1,123 @@
+cubes:
+  - name: DailySummary
+    sql_table: gold.daily_summary
+    # Grain: one row per (symbol, event_date).
+    # This is the primary cube for end-of-day analytics, Conversational BI,
+    # and MIS scheduled reports. Contains OHLCV, VWAP, daily return %.
+
+    dimensions:
+      - name: symbol
+        sql: symbol
+        type: string
+        primary_key: false
+
+      - name: event_date
+        sql: event_date
+        type: time
+
+      # Raw OHLC values — expose as dimensions for single-day grain queries.
+      # For cross-date aggregation, use the corresponding measures below.
+      - name: open_price
+        sql: open
+        type: number
+
+      - name: close_price
+        sql: close
+        type: number
+
+      - name: vwap
+        sql: vwap
+        type: number
+
+      - name: daily_return_pct
+        sql: daily_return_pct
+        type: number
+
+    measures:
+      - name: trading_days
+        type: count
+        description: Number of trading days in the selected period
+
+      - name: max_high
+        sql: high
+        type: max
+        description: All-time high over the selected period
+
+      - name: min_low
+        sql: low
+        type: min
+        description: All-time low over the selected period
+
+      - name: total_volume
+        sql: volume
+        type: sum
+        description: Total volume traded over the selected period
+
+      - name: avg_vwap
+        sql: vwap
+        type: avg
+        description: Average VWAP (volume-weighted average price) over the period
+
+      - name: avg_daily_return_pct
+        sql: daily_return_pct
+        type: avg
+        description: Average daily return percentage over the period
+
+      - name: sum_tick_count
+        sql: tick_count
+        type: sum
+        description: Total number of raw ticks processed (data-quality signal)
+
+      # Positive return days — useful for win-rate reporting
+      - name: positive_return_days
+        sql: daily_return_pct
+        type: count
+        filters:
+          - sql: "{CUBE}.daily_return_pct > 0"
+        description: Number of days the symbol closed with a positive return
+
+      # Volatile day count — days with absolute return > 2%
+      - name: volatile_days
+        sql: daily_return_pct
+        type: count
+        filters:
+          - sql: "ABS({CUBE}.daily_return_pct) > 2"
+        description: Number of days with absolute price move > 2%
+
+    pre_aggregations:
+      # Materialised weekly rollup used by Conversational BI and MIS dashboards
+      - name: by_symbol_week
+        type: rollup
+        dimensions:
+          - symbol
+        measures:
+          - trading_days
+          - max_high
+          - min_low
+          - total_volume
+          - avg_vwap
+          - avg_daily_return_pct
+        time_dimension: event_date
+        granularity: week
+        partition_granularity: month
+        refresh_key:
+          every: 1 hour
+
+      # Materialised monthly rollup for trend reporting
+      - name: by_symbol_month
+        type: rollup
+        dimensions:
+          - symbol
+        measures:
+          - trading_days
+          - max_high
+          - min_low
+          - total_volume
+          - avg_vwap
+          - avg_daily_return_pct
+          - positive_return_days
+        time_dimension: event_date
+        granularity: month
+        partition_granularity: month
+        refresh_key:
+          every: 6 hours

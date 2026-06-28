@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<configuration>
+  <!-- Use local path so HMS doesn't need S3A jars; Trino handles S3 itself -->
+  <property>
+    <name>hive.metastore.warehouse.dir</name>
+    <value>/tmp/hive-warehouse</value>
+  </property>
+  <property>
+    <name>hive.metastore.schema.verification</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>datanucleus.autoCreateSchema</name>
+    <value>true</value>
+  </property>
+</configuration>

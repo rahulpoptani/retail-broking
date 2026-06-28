@@ -1,0 +1,52 @@
+cubes:
+  - name: NavDaily
+    sql_table: gold.nav_daily
+    # Grain: one row per (scheme, date) — daily NAV snapshot for mutual fund schemes.
+
+    dimensions:
+      - name: scheme
+        sql: scheme
+        type: string
+
+      - name: nav_date
+        sql: date
+        type: time
+
+      - name: nav
+        sql: nav
+        type: number
+        description: Net Asset Value per unit on that date
+
+    measures:
+      - name: scheme_count
+        sql: scheme
+        type: count_distinct
+        description: Number of unique mutual fund schemes in the selected period
+
+      - name: avg_nav
+        sql: nav
+        type: avg
+        description: Average NAV across selected schemes and period
+
+      - name: max_nav
+        sql: nav
+        type: max
+
+      - name: min_nav
+        sql: nav
+        type: min
+
+    pre_aggregations:
+      - name: by_scheme_month
+        type: rollup
+        dimensions:
+          - scheme
+        measures:
+          - avg_nav
+          - max_nav
+          - min_nav
+        time_dimension: nav_date
+        granularity: month
+        partition_granularity: month
+        refresh_key:
+          every: 24 hours

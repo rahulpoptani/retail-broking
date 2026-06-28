@@ -1,0 +1,247 @@
+cubes:
+  # ─── 5-minute OHLCV bars ────────────────────────────────────────────────────
+  - name: OhlcvBars5Min
+    sql_table: gold.ohlcv_5min
+    # Grain: one row per (symbol, 5-min window). Pre-aggregated by SilverToGoldJob.
+    # Don't re-aggregate open/close — they are already the correct first/last tick
+    # within each bar. Use max_high / min_low / sum_volume for cross-bar rollups.
+
+    dimensions:
+      - name: symbol
+        sql: symbol
+        type: string
+        primary_key: false
+
+      - name: interval_label
+        sql: interval
+        type: string
+
+      - name: window_start
+        sql: window_start
+        type: time
+
+      - name: window_end
+        sql: window_end
+        type: time
+
+      - name: event_date
+        sql: event_date
+        type: time
+
+      - name: open
+        sql: open
+        type: number
+
+      - name: high
+        sql: high
+        type: number
+
+      - name: low
+        sql: low
+        type: number
+
+      - name: close
+        sql: close
+        type: number
+
+    measures:
+      - name: bar_count
+        type: count
+        description: Number of 5-min bars in the selected range
+
+      - name: max_high
+        sql: high
+        type: max
+        description: Highest price across all selected bars
+
+      - name: min_low
+        sql: low
+        type: min
+        description: Lowest price across all selected bars
+
+      - name: sum_volume
+        sql: volume
+        type: sum
+        description: Total volume across all selected bars
+
+      - name: avg_close
+        sql: close
+        type: avg
+        description: Average closing price across bars (use for trend approximation only)
+
+    pre_aggregations:
+      - name: by_symbol_day
+        type: rollup
+        dimensions:
+          - symbol
+          - event_date
+        measures:
+          - max_high
+          - min_low
+          - sum_volume
+          - bar_count
+        time_dimension: window_start
+        granularity: day
+        partition_granularity: month
+        refresh_key:
+          every: 15 minutes
+        build_range_start:
+          sql: "SELECT NOW() - INTERVAL '90' DAY"
+        build_range_end:
+          sql: "SELECT NOW()"
+
+  # ─── 15-minute OHLCV bars ───────────────────────────────────────────────────
+  - name: OhlcvBars15Min
+    sql_table: gold.ohlcv_15min
+
+    dimensions:
+      - name: symbol
+        sql: symbol
+        type: string
+
+      - name: interval_label
+        sql: interval
+        type: string
+
+      - name: window_start
+        sql: window_start
+        type: time
+
+      - name: window_end
+        sql: window_end
+        type: time
+
+      - name: event_date
+        sql: event_date
+        type: time
+
+      - name: open
+        sql: open
+        type: number
+
+      - name: high
+        sql: high
+        type: number
+
+      - name: low
+        sql: low
+        type: number
+
+      - name: close
+        sql: close
+        type: number
+
+    measures:
+      - name: bar_count
+        type: count
+
+      - name: max_high
+        sql: high
+        type: max
+
+      - name: min_low
+        sql: low
+        type: min
+
+      - name: sum_volume
+        sql: volume
+        type: sum
+
+      - name: avg_close
+        sql: close
+        type: avg
+
+    pre_aggregations:
+      - name: by_symbol_day
+        type: rollup
+        dimensions:
+          - symbol
+          - event_date
+        measures:
+          - max_high
+          - min_low
+          - sum_volume
+          - bar_count
+        time_dimension: window_start
+        granularity: day
+        partition_granularity: month
+        refresh_key:
+          every: 15 minutes
+
+  # ─── 1-hour OHLCV bars ──────────────────────────────────────────────────────
+  - name: OhlcvBars1Hour
+    sql_table: gold.ohlcv_1hour
+
+    dimensions:
+      - name: symbol
+        sql: symbol
+        type: string
+
+      - name: interval_label
+        sql: interval
+        type: string
+
+      - name: window_start
+        sql: window_start
+        type: time
+
+      - name: window_end
+        sql: window_end
+        type: time
+
+      - name: event_date
+        sql: event_date
+        type: time
+
+      - name: open
+        sql: open
+        type: number
+
+      - name: high
+        sql: high
+        type: number
+
+      - name: low
+        sql: low
+        type: number
+
+      - name: close
+        sql: close
+        type: number
+
+    measures:
+      - name: bar_count
+        type: count
+
+      - name: max_high
+        sql: high
+        type: max
+
+      - name: min_low
+        sql: low
+        type: min
+
+      - name: sum_volume
+        sql: volume
+        type: sum
+
+      - name: avg_close
+        sql: close
+        type: avg
+
+    pre_aggregations:
+      - name: by_symbol_week
+        type: rollup
+        dimensions:
+          - symbol
+          - event_date
+        measures:
+          - max_high
+          - min_low
+          - sum_volume
+          - bar_count
+        time_dimension: window_start
+        granularity: week
+        partition_granularity: month
+        refresh_key:
+          every: 1 hour

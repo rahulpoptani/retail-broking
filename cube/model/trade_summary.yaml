@@ -1,0 +1,90 @@
+cubes:
+  - name: TradeSummary
+    sql_table: gold.trade_summary
+    # Grain: one row per (account_id, event_date).
+    # Primary cube for brokerage revenue, MIS P&L, and compliance reporting.
+    # Row-level security: MIS Analysts see only their assigned account segments.
+
+    dimensions:
+      - name: account_id
+        sql: account_id
+        type: string
+        primary_key: false
+
+      - name: event_date
+        sql: event_date
+        type: time
+
+    measures:
+      - name: trade_count
+        type: count
+        description: Number of account-day rows (not individual fills)
+
+      - name: total_fills
+        sql: fills
+        type: sum
+        description: Total number of fills (individual trade executions)
+
+      - name: total_brokerage
+        sql: brokerage
+        type: sum
+        description: Total brokerage collected (INR)
+
+      - name: total_charges
+        sql: charges
+        type: sum
+        description: Total statutory charges (STT, exchange levy, GST) in INR
+
+      - name: total_revenue
+        sql: "brokerage + charges"
+        type: sum
+        description: Total revenue = brokerage + charges
+
+      - name: avg_brokerage_per_account
+        sql: brokerage
+        type: avg
+        description: Average brokerage per account per day
+
+      - name: active_accounts
+        sql: account_id
+        type: count_distinct
+        description: Number of unique accounts that traded in the period
+
+      # High-value account flag — accounts generating > ₹10,000 brokerage per day
+      - name: high_value_account_days
+        sql: brokerage
+        type: count
+        filters:
+          - sql: "{CUBE}.brokerage > 10000"
+        description: Account-days where brokerage exceeded ₹10,000
+
+    pre_aggregations:
+      - name: daily_brokerage_summary
+        type: rollup
+        dimensions:
+          - account_id
+        measures:
+          - total_fills
+          - total_brokerage
+          - total_charges
+          - total_revenue
+        time_dimension: event_date
+        granularity: day
+        partition_granularity: month
+        refresh_key:
+          every: 1 hour
+
+      # Revenue rollup used by Conversational BI for "last month brokerage" queries
+      - name: monthly_revenue_rollup
+        type: rollup
+        measures:
+          - total_brokerage
+          - total_charges
+          - total_revenue
+          - active_accounts
+          - total_fills
+        time_dimension: event_date
+        granularity: month
+        partition_granularity: month
+        refresh_key:
+          every: 6 hours

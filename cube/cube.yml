@@ -1,0 +1,18 @@
+apiVersion: 1
+
+# Cube connects to Trino, which federates across Silver and Gold Iceberg tables
+# via the Apache Polaris REST catalog. Cube never touches Iceberg/S3 directly.
+datasources:
+  default:
+    type: trino
+    host: "${TRINO_HOST}"
+    port: "${TRINO_PORT}"
+    catalog: "${TRINO_CATALOG}"    # e.g. "iceberg" — the catalog registered in Polaris
+    schema: gold
+    user: "${CUBE_USER}"
+    ssl: false
+
+# Row-level security: enforce that each consumer sees only their permitted data.
+# Cube injects a WHERE clause on every query based on the authenticated principal.
+# contextToRoles maps the JWT/session claims → Cube security context.
+context_to_roles_path: "security/context_to_roles.js"
