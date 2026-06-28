@@ -4,7 +4,7 @@ set -e
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
-SERVICES=("zookeeper" "kafka" "minio" "nessie" "kafka-connect-s3" "clickhouse")
+SERVICES=("zookeeper" "kafka" "minio" "hive-metastore" "trino" "kafka-connect-s3" "clickhouse" "spark-master" "spark-worker")
 
 KAFKA_TOPICS=("market-data" "control-iceberg")
 KAFKA_CONTAINER="kafka"
@@ -52,7 +52,7 @@ check_services() {
 
 start_services() {
   log "Starting services via docker compose..."
-  docker compose up -d
+  docker compose up -d --build
   echo ""
 
   log "Waiting 10 seconds for services to become healthy..."
@@ -79,18 +79,18 @@ start_services() {
 
 ensure_minio_paths() {
   echo ""
-  log "Ensuring MinIO warehouse paths (bronze / silver / gold)..."
+  log "Ensuring MinIO warehouse path (bronze)..."
+  # silver and gold are created automatically by Spark as silver.db/ and gold.db/
+  # (Hive catalog default: {warehouse}/{namespace}.db/). No placeholder needed.
 
   docker run --rm --network container:minio --entrypoint /bin/sh minio/mc:latest -c "
     mc alias set local http://localhost:9000 minioadmin minioadmin >/dev/null 2>&1
-    for layer in bronze silver gold; do
-      if mc stat local/warehouse/\$layer/.keep >/dev/null 2>&1; then
-        echo '    [exists]  warehouse/'\$layer'/'
-      else
-        printf '' | mc pipe local/warehouse/\$layer/.keep >/dev/null 2>&1
-        echo '    [created] warehouse/'\$layer'/'
-      fi
-    done
+    if mc stat local/warehouse/bronze/.keep >/dev/null 2>&1; then
+      echo '    [exists]  warehouse/bronze/'
+    else
+      printf '' | mc pipe local/warehouse/bronze/.keep >/dev/null 2>&1
+      echo '    [created] warehouse/bronze/'
+    fi
   "
 }
 
@@ -204,7 +204,7 @@ reset_kafka_topics() {
 
 register_iceberg_sink() {
   echo ""
-  log "Registering Iceberg Sink Connector (market-data → MinIO warehouse/bronze/market_data via Nessie)..."
+  log "Registering Iceberg Sink Connector (market-data → MinIO warehouse/bronze/market_data via Hive Metastore)..."
 
   local attempts=0
   until curl -sf http://localhost:8084/connectors >/dev/null 2>&1; do
@@ -222,40 +222,40 @@ register_iceberg_sink() {
     sleep 2
   fi
 
-  local nessie_attempts=0
-  until curl -sf http://localhost:19120/api/v1/trees >/dev/null 2>&1; do
-    if [ "$nessie_attempts" -ge 30 ]; then
-      info "[FAILED] Nessie REST API not reachable after 60s"
+  local trino_attempts=0
+  until curl -sf http://localhost:8080/v1/info >/dev/null 2>&1; do
+    if [ "$trino_attempts" -ge 30 ]; then
+      info "[FAILED] Trino REST API not reachable after 60s"
       return 1
     fi
     sleep 2
-    ((nessie_attempts++)) || true
+    ((trino_attempts++)) || true
   done
-  info "[ready] Nessie catalog"
+  info "[ready] Trino / Hive Metastore catalog"
 
-  curl -sf -X PUT http://localhost:19120/api/v1/namespaces/namespace/main/bronze \
-    -H "Content-Type: application/json" \
-    -d '{"type": "NAMESPACE", "elements": ["bronze"], "properties": {}}' >/dev/null 2>&1 || true
-  info "[ready] Nessie namespace: bronze"
+  docker exec trino trino --execute \
+    "CREATE SCHEMA IF NOT EXISTS iceberg.bronze WITH (location = 's3a://warehouse/bronze')" \
+    >/dev/null
+  info "[ready] Hive namespace: bronze"
 
   curl -sf -X POST http://localhost:8084/connectors \
     -H "Content-Type: application/json" \
     -d '{
       "name": "iceberg-sink-market-data",
       "config": {
-        "connector.class": "io.tabular.iceberg.connect.IcebergSinkConnector",
+        "connector.class": "org.apache.iceberg.connect.IcebergSinkConnector",
         "tasks.max": "1",
         "topics": "market-data",
         "iceberg.tables": "bronze.market_data",
         "iceberg.tables.auto-create-enabled": "true",
         "iceberg.tables.evolve-schema-enabled": "true",
-        "iceberg.tables.upsert-mode-enabled": "false",
-        "iceberg.tables.commitIntervalMs": "60000",
-        "iceberg.tables.commitTimeoutIntervalMs": "300000",
-        "iceberg.catalog.type": "nessie",
-        "iceberg.catalog.uri": "http://nessie:19120/api/v1",
-        "iceberg.catalog.ref": "main",
-        "iceberg.catalog.warehouse": "s3://warehouse/",
+        "iceberg.tables.schema-force-optional": "true",
+        "iceberg.control.topic": "control-iceberg",
+        "iceberg.control.commit.interval-ms": "60000",
+        "iceberg.control.commit.timeout-ms": "300000",
+        "iceberg.catalog.type": "hive",
+        "iceberg.catalog.uri": "thrift://hive-metastore:9083",
+        "iceberg.catalog.warehouse": "s3a://warehouse/",
         "iceberg.catalog.io-impl": "org.apache.iceberg.aws.s3.S3FileIO",
         "iceberg.catalog.s3.endpoint": "http://minio:9000",
         "iceberg.catalog.s3.access-key-id": "minioadmin",
@@ -268,8 +268,8 @@ register_iceberg_sink() {
       }
     }' >/dev/null
 
-  info "[registered] iceberg-sink-market-data → s3://warehouse/bronze/market_data/ (Iceberg via Nessie)"
-
+  info "[registered] iceberg-sink-market-data → s3a://warehouse/bronze/market_data/ (Iceberg via Hive Metastore)"
+   
   local task_attempts=0
   local task_state=""
   until [ "$task_state" = "RUNNING" ]; do
@@ -278,7 +278,7 @@ register_iceberg_sink() {
       trace=$(curl -sf http://localhost:8084/connectors/iceberg-sink-market-data/status | python3 -c "import sys,json; t=json.load(sys.stdin)['tasks']; print(t[0].get('trace','no trace')) if t else print('no tasks')" 2>/dev/null)
       info "[FAILED] Connector task did not reach RUNNING after 60s"
       info "  trace: $trace"
-      exit 1
+      return 1
     fi
     sleep 2
     task_state=$(curl -sf http://localhost:8084/connectors/iceberg-sink-market-data/status \

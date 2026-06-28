@@ -109,6 +109,7 @@ services:
     container_name: hive-metastore
     environment:
       SERVICE_NAME: metastore
+      HADOOP_CLASSPATH: /opt/hadoop/share/hadoop/tools/lib/*
     volumes:
       - ./hive-metastore/hive-site.xml:/opt/hive/conf/hive-site.xml
       - hive_metastore_data:/opt/hive/data
@@ -120,16 +121,11 @@ services:
     container_name: trino
     depends_on:
       - hive-metastore
+      - minio
     ports:
       - "8080:8080"
     volumes:
       - ./trino/catalog:/etc/trino/catalog
-
-  nessie:
-    image: ghcr.io/projectnessie/nessie:0.77.1
-    container_name: nessie
-    ports:
-      - "19120:19120"
 
   kafka-connect-s3:
     build: ./connect-s3
@@ -137,7 +133,7 @@ services:
     depends_on:
       - kafka
       - minio
-      - nessie
+      - hive-metastore
     ports:
       - "8084:8083"
     environment:
@@ -158,7 +154,37 @@ services:
       AWS_ACCESS_KEY_ID: minioadmin
       AWS_SECRET_ACCESS_KEY: minioadmin
 
+  spark-master:
+    image: apache/spark:3.5.8-java17
+    container_name: spark-master
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+    user: root
+    depends_on:
+      - hive-metastore
+      - minio
+    ports:
+      - "7077:7077"
+      - "8082:8080"
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      HIVE_METASTORE_URI: thrift://hive-metastore:9083
+
+  spark-worker:
+    image: apache/spark:3.5.8-java17
+    container_name: spark-worker
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker --cores 2 --memory 2G spark://spark-master:7077
+    user: root
+    depends_on:
+      - spark-master
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      HIVE_METASTORE_URI: thrift://hive-metastore:9083
+
 volumes:
   minio_data:
   clickhouse_data:
   hive_metastore_data:
+
+networks:
+  default:
+    name: retailbroking

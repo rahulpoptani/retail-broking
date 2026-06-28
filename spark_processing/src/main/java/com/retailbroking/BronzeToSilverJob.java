@@ -62,19 +62,19 @@ public class BronzeToSilverJob {
         System.out.printf("[Bronze→Silver] Bronze row count: %d%n", bronzeCount);
 
         // ── 2. Clean & transform ──────────────────────────────────────────────
+        // Use select+alias to rename PascalCase → snake_case and cast in one step.
+        // Avoids the Spark case-insensitive drop bug where drop("Open") also
+        // removes the newly created "open" column.
         Dataset<Row> silver = bronze
-                // Parse the datetime string as UTC (same convention as Flink)
-                .withColumn("event_time",
-                        to_timestamp(col("Datetime"), "yyyy-MM-dd HH:mm:ss"))
-                // Normalise to snake_case
-                .withColumnRenamed("Symbol", "symbol")
-                // Explicit casts guard against schema drift in the bronze source
-                .withColumn("open",   col("Open").cast("double"))
-                .withColumn("high",   col("High").cast("double"))
-                .withColumn("low",    col("Low").cast("double"))
-                .withColumn("close",  col("Close").cast("double"))
-                .withColumn("volume", col("Volume").cast("long"))
-                .drop("Datetime", "Open", "High", "Low", "Close", "Volume")
+                .select(
+                        to_timestamp(col("Datetime"), "yyyy-MM-dd HH:mm:ss").alias("event_time"),
+                        col("Symbol").alias("symbol"),
+                        col("Open").cast("double").alias("open"),
+                        col("High").cast("double").alias("high"),
+                        col("Low").cast("double").alias("low"),
+                        col("Close").cast("double").alias("close"),
+                        col("Volume").cast("long").alias("volume")
+                )
 
                 // ── Null safety ───────────────────────────────────────────────
                 .filter(col("event_time").isNotNull()
@@ -101,8 +101,7 @@ public class BronzeToSilverJob {
                 .withColumn("event_hour", hour(col("event_time")))
 
                 // Canonical output column order
-                .select("symbol", "event_time", "event_date", "event_hour",
-                        "open", "high", "low", "close", "volume");
+                .select("symbol", "event_time", "event_date", "event_hour", "open", "high", "low", "close", "volume");
 
         silver.cache();
         long silverCount = silver.count();
@@ -115,7 +114,7 @@ public class BronzeToSilverJob {
         //
         // Partition by symbol + event_date so downstream Spark / Trino queries
         // can push predicates and avoid full-table scans.
-        spark.sql("CREATE NAMESPACE IF NOT EXISTS local.silver");
+        spark.sql("CREATE NAMESPACE IF NOT EXISTS local.silver LOCATION 's3a://warehouse/silver'");
 
         silver.writeTo(SILVER_TABLE)
                 .tableProperty("write.format.default", "parquet")

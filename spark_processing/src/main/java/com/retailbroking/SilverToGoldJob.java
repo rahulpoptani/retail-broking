@@ -60,7 +60,7 @@ public class SilverToGoldJob {
             return;
         }
 
-        spark.sql("CREATE NAMESPACE IF NOT EXISTS local.gold");
+        spark.sql("CREATE NAMESPACE IF NOT EXISTS local.gold LOCATION 's3a://warehouse/gold'");
 
         // ── Intraday OHLCV bars ───────────────────────────────────────────────
         writeOhlcvBars(silver, "5MIN",  "5 minutes",  "local.gold.ohlcv_5min");
